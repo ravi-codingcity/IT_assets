@@ -1,0 +1,552 @@
+import { useState, useEffect } from "react";
+import { companies, deviceTypes, branches as defaultBranches, departments, brands, operatingSystems } from "../data/assets";
+import { getAllBranches, createBranch } from "../services/branchService";
+
+const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser }) => {
+  const [formData, setFormData] = useState({
+    serialNumber: "",
+    companyName: "",
+    branch: "",
+    department: "",
+    userName: "",
+    brand: "",
+    device: "",
+    deviceSerialNo: "",
+    operatingSystem: "",
+    dateOfPurchase: "",
+    remark: "",
+  });
+  const [errors, setErrors] = useState({});
+  const [customBranches, setCustomBranches] = useState([]);
+  const [showCustomBranchInput, setShowCustomBranchInput] = useState(false);
+  const [customBranchValue, setCustomBranchValue] = useState("");
+  const [branchLoading, setBranchLoading] = useState(false);
+
+  // Combined branch list (default + custom from database)
+  const allBranches = [...new Set([...defaultBranches, ...customBranches])];
+
+  // Fetch custom branches from database
+  const fetchCustomBranches = async () => {
+    try {
+      const response = await getAllBranches();
+      const branchData = response.data || response.branches || response || [];
+      const branchNames = Array.isArray(branchData) 
+        ? branchData.map(b => typeof b === 'string' ? b : b.name).filter(Boolean)
+        : [];
+      setCustomBranches(branchNames);
+    } catch (error) {
+      console.error("Error fetching custom branches:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchCustomBranches();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (editingAsset) {
+      setFormData({
+        serialNumber: editingAsset.serialNumber || "",
+        companyName: editingAsset.companyName || "",
+        branch: editingAsset.branch || "",
+        department: editingAsset.department || "",
+        userName: editingAsset.userName || "",
+        brand: editingAsset.brand || "",
+        device: editingAsset.device || "",
+        deviceSerialNo: editingAsset.deviceSerialNo || "",
+        operatingSystem: editingAsset.operatingSystem || "",
+        dateOfPurchase: editingAsset.dateOfPurchase || "",
+        remark: editingAsset.remark || "",
+      });
+    } else {
+      setFormData({
+        serialNumber: "",
+        companyName: "",
+        branch: "",
+        department: "",
+        userName: "",
+        brand: "",
+        device: "",
+        deviceSerialNo: "",
+        operatingSystem: "",
+        dateOfPurchase: "",
+        remark: "",
+      });
+    }
+    setErrors({});
+    setShowCustomBranchInput(false);
+    setCustomBranchValue("");
+  }, [editingAsset, isOpen]);
+
+  // Generate serial number based on company
+  const generateSerialNumber = (company) => {
+    if (!company) return "";
+    
+    const prefixMap = {
+      "OmTrans": "OMT",
+      "TGL": "TGL",
+      "OmTrax": "OMX"
+    };
+    
+    const prefix = prefixMap[company] || "XXX";
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const year = now.getFullYear();
+    const randomNum = String(Math.floor(Math.random() * 900) + 100); // 100-999
+    
+    return `${prefix}-${day}${month}${year}-${randomNum}`;
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.serialNumber.trim()) {
+      newErrors.serialNumber = "Serial number is required";
+    }
+    if (!formData.companyName) {
+      newErrors.companyName = "Company is required";
+    }
+    if (!formData.branch) {
+      newErrors.branch = "Branch is required";
+    }
+    if (!formData.department) {
+      newErrors.department = "Department is required";
+    }
+    if (!formData.userName.trim()) {
+      newErrors.userName = "User name is required";
+    }
+    if (!formData.device) {
+      newErrors.device = "Device type is required";
+    }
+    if (!formData.deviceSerialNo.trim()) {
+      newErrors.deviceSerialNo = "Device serial number is required";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (validateForm()) {
+      onSubmit(formData);
+      onClose();
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    
+    // Auto-generate serial number when company is selected (only for new entries)
+    if (name === "companyName" && !editingAsset) {
+      const newSerialNumber = generateSerialNumber(value);
+      setFormData((prev) => ({ 
+        ...prev, 
+        [name]: value,
+        serialNumber: newSerialNumber 
+      }));
+      if (errors.serialNumber) {
+        setErrors((prev) => ({ ...prev, serialNumber: "" }));
+      }
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
+    
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        onClick={onClose}
+      ></div>
+
+      {/* Modal */}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl transform transition-all max-h-[90vh] overflow-y-auto">
+          {/* Header */}
+          <div className="sticky top-0 bg-white flex items-center justify-between p-4 border-b border-gray-200 z-10">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">
+                {editingAsset ? "Edit IT Asset" : "Add New IT Asset"}
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {editingAsset
+                  ? "Update the asset information below"
+                  : "Fill in the details to add a new asset"}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Serial Number - Auto-generated */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  S.No <span className="text-red-500">*</span>
+                  {!editingAsset && <span className="text-gray-400 font-normal ml-1">(Auto-generated)</span>}
+                </label>
+                <input
+                  type="text"
+                  name="serialNumber"
+                  value={formData.serialNumber}
+                  onChange={handleChange}
+                  placeholder={editingAsset ? "e.g., OMT-02022026-123" : "Select company to generate"}
+                  readOnly={!editingAsset}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg transition-colors ${
+                    !editingAsset 
+                      ? "bg-gray-50 text-gray-700 cursor-not-allowed" 
+                      : "focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  } ${
+                    errors.serialNumber ? "border-red-500" : "border-gray-300"
+                  }`}
+                />
+                {errors.serialNumber && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.serialNumber}</p>
+                )}
+              </div>
+
+              {/* Company Name */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Company <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="companyName"
+                  value={formData.companyName}
+                  onChange={handleChange}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
+                    errors.companyName ? "border-red-500" : "border-gray-300"
+                  }`}
+                >
+                  <option value="">Select company</option>
+                  {companies.map((company) => (
+                    <option key={company} value={company}>
+                      {company}
+                    </option>
+                  ))}
+                </select>
+                {errors.companyName && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.companyName}</p>
+                )}
+              </div>
+
+              {/* Branch */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Branch <span className="text-red-500">*</span>
+                </label>
+                {!showCustomBranchInput ? (
+                  <div className="space-y-1">
+                    <select
+                      name="branch"
+                      value={formData.branch}
+                      onChange={handleChange}
+                      className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
+                        errors.branch ? "border-red-500" : "border-gray-300"
+                      }`}
+                    >
+                      <option value="">Select branch</option>
+                      {allBranches.map((branch) => (
+                        <option key={branch} value={branch}>
+                          {branch}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomBranchInput(true)}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                    >
+                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add custom branch
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customBranchValue}
+                        onChange={(e) => setCustomBranchValue(e.target.value)}
+                        placeholder="Enter custom branch name"
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        disabled={branchLoading}
+                        onClick={async () => {
+                          if (customBranchValue.trim()) {
+                            setBranchLoading(true);
+                            try {
+                              // Save to database
+                              await createBranch(customBranchValue.trim());
+                              // Update local state
+                              setCustomBranches(prev => [...prev, customBranchValue.trim()]);
+                              setFormData((prev) => ({ ...prev, branch: customBranchValue.trim() }));
+                              setCustomBranchValue("");
+                              setShowCustomBranchInput(false);
+                              if (errors.branch) {
+                                setErrors((prev) => ({ ...prev, branch: "" }));
+                              }
+                            } catch (error) {
+                              console.error("Error saving branch:", error);
+                              // Still add locally even if API fails
+                              setCustomBranches(prev => [...prev, customBranchValue.trim()]);
+                              setFormData((prev) => ({ ...prev, branch: customBranchValue.trim() }));
+                              setCustomBranchValue("");
+                              setShowCustomBranchInput(false);
+                            } finally {
+                              setBranchLoading(false);
+                            }
+                          }
+                        }}
+                        className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      >
+                        {branchLoading ? "..." : "Add"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCustomBranchInput(false);
+                          setCustomBranchValue("");
+                        }}
+                        className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500">Enter a new branch name to save it to the database</p>
+                  </div>
+                )}
+                {errors.branch && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.branch}</p>
+                )}
+              </div>
+
+              {/* Department */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Department <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="department"
+                  value={formData.department}
+                  onChange={handleChange}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
+                    errors.department ? "border-red-500" : "border-gray-300"
+                  }`}
+                >
+                  <option value="">Select department</option>
+                  {departments.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+                {errors.department && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.department}</p>
+                )}
+              </div>
+
+              {/* User Name */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  User Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="userName"
+                  value={formData.userName}
+                  onChange={handleChange}
+                  placeholder="e.g., John Doe"
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                    errors.userName ? "border-red-500" : "border-gray-300"
+                  }`}
+                />
+                {errors.userName && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.userName}</p>
+                )}
+              </div>
+
+              {/* Brand */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Brand
+                </label>
+                <select
+                  name="brand"
+                  value={formData.brand}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                >
+                  <option value="">Select brand</option>
+                  {brands.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Device Type */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Device <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="device"
+                  value={formData.device}
+                  onChange={handleChange}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
+                    errors.device ? "border-red-500" : "border-gray-300"
+                  }`}
+                >
+                  <option value="">Select device type</option>
+                  {deviceTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                {errors.device && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.device}</p>
+                )}
+              </div>
+
+              {/* Device Serial Number */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Device Serial No. <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="deviceSerialNo"
+                  value={formData.deviceSerialNo}
+                  onChange={handleChange}
+                  placeholder="e.g., ABC123XYZ"
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors ${
+                    errors.deviceSerialNo ? "border-red-500" : "border-gray-300"
+                  }`}
+                />
+                {errors.deviceSerialNo && (
+                  <p className="mt-0.5 text-xs text-red-500">{errors.deviceSerialNo}</p>
+                )}
+              </div>
+
+              {/* Operating System */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Operating System
+                </label>
+                <select
+                  name="operatingSystem"
+                  value={formData.operatingSystem}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors"
+                >
+                  <option value="">Select OS</option>
+                  {operatingSystems.map((os) => (
+                    <option key={os} value={os}>
+                      {os}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Date of Purchase */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Date of Purchase
+                </label>
+                <input
+                  type="date"
+                  name="dateOfPurchase"
+                  value={formData.dateOfPurchase}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              {/* Remark */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Remark
+                </label>
+                <input
+                  type="text"
+                  name="remark"
+                  value={formData.remark}
+                  onChange={handleChange}
+                  placeholder="Optional notes"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end space-x-3 mt-4 pt-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium transition-colors flex items-center space-x-2"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d={editingAsset ? "M5 13l4 4L19 7" : "M12 4v16m8-8H4"}
+                  />
+                </svg>
+                <span>{editingAsset ? "Update Asset" : "Add Asset"}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AssetFormModal;

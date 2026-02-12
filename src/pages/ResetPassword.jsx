@@ -6,6 +6,7 @@ import OmTransLogo from "../assets/OmTrans.png";
 const ResetPassword = () => {
   const [formData, setFormData] = useState({
     username: "",
+    oldPassword: "",
     newPassword: "",
     confirmPassword: "",
   });
@@ -39,7 +40,7 @@ const ResetPassword = () => {
     setIsLoading(true);
 
     try {
-      await resetPassword(formData.username, formData.newPassword);
+      await resetPassword(formData.username, formData.oldPassword, formData.newPassword);
 
       setSuccess("Password reset successfully! Redirecting to login...");
       setTimeout(() => {
@@ -114,6 +115,23 @@ const ResetPassword = () => {
                 value={formData.username}
                 onChange={handleChange}
                 placeholder="Enter your username"
+                required
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900 placeholder-gray-400"
+              />
+            </div>
+
+            {/* Old Password Field */}
+            <div>
+              <label htmlFor="oldPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                Current Password
+              </label>
+              <input
+                id="oldPassword"
+                name="oldPassword"
+                type="password"
+                value={formData.oldPassword}
+                onChange={handleChange}
+                placeholder="Enter current password"
                 required
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900 placeholder-gray-400"
               />

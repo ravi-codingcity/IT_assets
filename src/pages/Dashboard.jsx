@@ -5,7 +5,7 @@ import AssetTable from "../components/AssetTable";
 import AssetFormModal from "../components/AssetFormModal";
 import { companies } from "../data/assets";
 import { useAuth } from "../context/AuthContext";
-import { getAllAssets, createAsset, updateAsset, deleteAsset, uploadExcel, getFilterOptions } from "../services/assetService";
+import { getAllAssets, createAsset, updateAsset, deleteAsset, uploadExcel, getFilterOptions, getAssetCounts } from "../services/assetService";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -43,6 +43,42 @@ const Dashboard = () => {
   
   // Track myAssetCount separately (from server when querying user's assets)
   const [myAssetCount, setMyAssetCount] = useState(0);
+
+  // Device counts from server (for summary cards)
+  const [deviceCounts, setDeviceCounts] = useState({
+    total: 0,
+    laptops: 0,
+    desktops: 0,
+    printers: 0
+  });
+
+  // Sort assets by serial number sequence (last 3 digits) descending, then by createdAt
+  const sortAssetsBySerialNumber = (assets) => {
+    return [...assets].sort((a, b) => {
+      // Extract last 3 digits from serial number (e.g., "OMT-12022026-050" -> 50)
+      const getSequence = (serialNumber) => {
+        if (!serialNumber) return 0;
+        const parts = serialNumber.split('-');
+        if (parts.length >= 3) {
+          return parseInt(parts[parts.length - 1], 10) || 0;
+        }
+        return 0;
+      };
+
+      const seqA = getSequence(a.serialNumber);
+      const seqB = getSequence(b.serialNumber);
+
+      // Primary sort: sequence number descending (higher first)
+      if (seqB !== seqA) {
+        return seqB - seqA;
+      }
+
+      // Secondary sort: createdAt descending (most recent first)
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+  };
 
   // Fetch assets from API with pagination, search, and filters
   const fetchAssets = useCallback(async (options = {}) => {
@@ -96,7 +132,9 @@ const Dashboard = () => {
         }
       }
       
-      setAssets(assetData);
+      // Sort assets by serial number sequence (last 3 digits descending)
+      const sortedAssets = sortAssetsBySerialNumber(assetData);
+      setAssets(sortedAssets);
     } catch (err) {
       console.error("Error fetching assets:", err);
       setError("Failed to load assets. Please check if the API server is running.");
@@ -156,6 +194,19 @@ const Dashboard = () => {
     }
   }, [user?._id]);
 
+  // Fetch device counts from server (updates when company filter changes)
+  useEffect(() => {
+    const fetchDeviceCounts = async () => {
+      try {
+        const counts = await getAssetCounts(selectedCompany);
+        setDeviceCounts(counts);
+      } catch (err) {
+        console.error("Error fetching device counts:", err);
+      }
+    };
+    fetchDeviceCounts();
+  }, [selectedCompany]);
+
   // Handle viewMode change - refetch with appropriate filter
   useEffect(() => {
     if (viewMode === "my" && user?._id) {
@@ -186,20 +237,8 @@ const Dashboard = () => {
 
   const displayedAssets = getFilteredAssets();
 
-  // Calculate counts based on current view
-  const getCountsForCurrentView = () => {
-    // Use pagination.totalItems for total count (all pages)
-    // Device type counts will only be accurate for current page
-    // For accurate device counts, backend would need to provide these
-    return {
-      total: pagination.totalItems || assets.length,
-      laptops: assets.filter((a) => a.device === "Laptop").length,
-      desktops: assets.filter((a) => a.device === "Desktop").length,
-      printers: assets.filter((a) => a.device === "Printer").length,
-    };
-  };
-
-  const counts = getCountsForCurrentView();
+  // Use server-side counts (already fetched via getAssetCounts)
+  const counts = deviceCounts;
 
   // Export currently displayed assets to Excel (admin only)
   const handleExportToExcel = () => {
@@ -303,6 +342,10 @@ const Dashboard = () => {
         if (imported > 0) {
           setMyAssetCount(prev => prev + imported);
         }
+        
+        // Refresh server-side counts
+        const updatedCounts = await getAssetCounts(selectedCompany);
+        setDeviceCounts(updatedCounts);
       } else {
         throw new Error(result.message || "Upload failed");
       }
@@ -412,6 +455,16 @@ const Dashboard = () => {
     }
   };
 
+  // Refresh device counts from server
+  const refreshCounts = useCallback(async () => {
+    try {
+      const counts = await getAssetCounts(selectedCompany);
+      setDeviceCounts(counts);
+    } catch (err) {
+      console.error("Error refreshing counts:", err);
+    }
+  }, [selectedCompany]);
+
   // Handle adding new asset
   const handleAddAsset = async (formData) => {
     try {
@@ -426,6 +479,8 @@ const Dashboard = () => {
       setIsModalOpen(false);
       // Update myAssetCount since we added a new asset
       setMyAssetCount(prev => prev + 1);
+      // Refresh server-side counts
+      refreshCounts();
     } catch (err) {
       console.error("Error creating asset:", err);
       setError("Failed to create asset. Please try again.");
@@ -443,6 +498,8 @@ const Dashboard = () => {
       await fetchAssets({ page: pagination.currentPage, createdBy: createdByFilter });
       setEditingAsset(null);
       setIsModalOpen(false);
+      // Refresh server-side counts (device type might have changed)
+      refreshCounts();
     } catch (err) {
       console.error("Error updating asset:", err);
       setError("Failed to update asset. Please try again.");
@@ -459,6 +516,8 @@ const Dashboard = () => {
       setShowDeleteConfirm(null);
       // Update myAssetCount since we deleted an asset
       setMyAssetCount(prev => Math.max(0, prev - 1));
+      // Refresh server-side counts
+      refreshCounts();
     } catch (err) {
       console.error("Error deleting asset:", err);
       setError("Failed to delete asset. Please try again.");
@@ -518,10 +577,13 @@ const Dashboard = () => {
           </div>
           <div className="flex items-center space-x-3 mt-4 sm:mt-0">
             <button
-              onClick={() => { 
+              onClick={async () => { 
                 setSearchTerm(""); 
                 const createdByFilter = viewMode === "my" ? user?._id : "";
-                fetchAssets({ page: 1, search: "", createdBy: createdByFilter }); 
+                await fetchAssets({ page: 1, search: "", createdBy: createdByFilter });
+                // Also refresh counts
+                const counts = await getAssetCounts(selectedCompany);
+                setDeviceCounts(counts);
               }}
               disabled={isLoading}
               className="inline-flex items-center px-4 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 transition-colors border border-gray-300"

@@ -75,6 +75,55 @@ export const getFilterOptions = async () => {
   }
 };
 
+// Get asset counts (total and by device type) with optional company filter
+export const getAssetCounts = async (companyName = "") => {
+  try {
+    const baseParams = {
+      page: 1,
+      limit: 1,
+      sortBy: "createdAt",
+      order: "desc"
+    };
+
+    // Build query params for each count request
+    const buildParams = (device = "") => {
+      const params = new URLSearchParams({
+        ...baseParams,
+        _t: Date.now().toString()
+      });
+      if (companyName) params.append("companyName", companyName);
+      if (device) params.append("device", device);
+      return params;
+    };
+
+    // Fetch all counts in parallel
+    const [totalRes, laptopRes, desktopRes, printerRes] = await Promise.all([
+      fetch(`${API_BASE_URL}?${buildParams()}`),
+      fetch(`${API_BASE_URL}?${buildParams("Laptop")}`),
+      fetch(`${API_BASE_URL}?${buildParams("Desktop")}`),
+      fetch(`${API_BASE_URL}?${buildParams("Printer")}`)
+    ]);
+
+    const extractCount = async (response) => {
+      if (!response.ok) return 0;
+      const data = await response.json();
+      return data?.data?.pagination?.totalItems || 0;
+    };
+
+    const [total, laptops, desktops, printers] = await Promise.all([
+      extractCount(totalRes),
+      extractCount(laptopRes),
+      extractCount(desktopRes),
+      extractCount(printerRes)
+    ]);
+
+    return { total, laptops, desktops, printers };
+  } catch (error) {
+    console.error("Error fetching asset counts:", error);
+    return { total: 0, laptops: 0, desktops: 0, printers: 0 };
+  }
+};
+
 // Upload Excel file for bulk import
 export const uploadExcel = async (file, createdBy) => {
   try {

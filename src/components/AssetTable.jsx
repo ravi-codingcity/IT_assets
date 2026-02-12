@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 // Format date to user-friendly format (DD-MM-YYYY)
 const formatDate = (dateString) => {
@@ -15,11 +15,35 @@ const formatDate = (dateString) => {
   }
 };
 
-const AssetTable = ({ assets, currentUser, onEdit, onDelete, viewMode, isAdmin }) => {
-  const [searchTerm, setSearchTerm] = useState("");
+const AssetTable = ({ 
+  assets, 
+  currentUser, 
+  onEdit, 
+  onDelete, 
+  viewMode, 
+  isAdmin,
+  pagination,
+  onPageChange,
+  searchTerm = "",
+  onSearch
+}) => {
+  // Local search input state for controlled input
+  const [localSearch, setLocalSearch] = useState(searchTerm);
+
+  // Sync local search with external searchTerm prop
+  useEffect(() => {
+    setLocalSearch(searchTerm);
+  }, [searchTerm]);
 
   // Check if the current user owns an asset
+  // Handle both cases: createdBy as string ID or as populated user object
   const canEditAsset = (asset) => {
+    if (!asset.createdBy || !currentUser) return false;
+    // If createdBy is an object (populated), compare _id
+    if (typeof asset.createdBy === 'object') {
+      return asset.createdBy._id === currentUser;
+    }
+    // Otherwise compare directly as string
     return asset.createdBy === currentUser;
   };
 
@@ -29,20 +53,84 @@ const AssetTable = ({ assets, currentUser, onEdit, onDelete, viewMode, isAdmin }
   // - Regular users: Always show action column (they only see their own data)
   const showActionColumn = isAdmin ? viewMode === "my" : true;
 
-  // Filter assets based on search only (type and company filters moved to Dashboard)
-  const filteredAssets = assets.filter((asset) => {
-    const matchesSearch =
-      asset.serialNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.companyName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.branch?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.userName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.device?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      asset.deviceSerialNo?.toLowerCase().includes(searchTerm.toLowerCase());
+  // Client-side search filter (fallback when backend doesn't support search)
+  // This filters the current page's assets only
+  const filteredAssets = localSearch.trim() 
+    ? assets.filter((asset) => {
+        const search = localSearch.toLowerCase();
+        return (
+          asset.serialNumber?.toLowerCase().includes(search) ||
+          asset.companyName?.toLowerCase().includes(search) ||
+          asset.branch?.toLowerCase().includes(search) ||
+          asset.department?.toLowerCase().includes(search) ||
+          asset.userName?.toLowerCase().includes(search) ||
+          asset.brand?.toLowerCase().includes(search) ||
+          asset.device?.toLowerCase().includes(search) ||
+          asset.deviceSerialNo?.toLowerCase().includes(search)
+        );
+      })
+    : assets;
 
-    return matchesSearch;
-  });
+  // Use server pagination values
+  const { currentPage, totalPages, totalItems, itemsPerPage, hasNextPage, hasPrevPage } = pagination || {
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: assets.length,
+    itemsPerPage: 20,
+    hasNextPage: false,
+    hasPrevPage: false
+  };
+
+  // Calculate display range
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+
+  // Handle search change - client-side filtering
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setLocalSearch(value);
+    
+    // Notify parent of search change (for tracking state)
+    if (onSearch) {
+      onSearch(value);
+    }
+  };
+
+  // Handle page navigation
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages && onPageChange) {
+      onPageChange(page);
+    }
+  };
+
+  // Generate page numbers for pagination
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisiblePages = 5;
+    
+    if (totalPages <= maxVisiblePages) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      if (currentPage <= 3) {
+        for (let i = 1; i <= 4; i++) pages.push(i);
+        pages.push("...");
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 2) {
+        pages.push(1);
+        pages.push("...");
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push("...");
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
+        pages.push("...");
+        pages.push(totalPages);
+      }
+    }
+    return pages;
+  };
 
   return (
     <div className="bg-white rounded-xl shadow-lg overflow-hidden">
@@ -67,8 +155,8 @@ const AssetTable = ({ assets, currentUser, onEdit, onDelete, viewMode, isAdmin }
           <input
             type="text"
             placeholder="Search by name, serial, branch, department..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={localSearch}
+            onChange={handleSearchChange}
             className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
           />
         </div>
@@ -140,10 +228,10 @@ const AssetTable = ({ assets, currentUser, onEdit, onDelete, viewMode, isAdmin }
                     {asset.branch?.length > 15 ? asset.branch.substring(0, 15) + "..." : asset.branch}
                   </td>
                   <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap" title={asset.department}>
-                    {asset.department?.length > 12 ? asset.department.substring(0, 12) + "..." : asset.department}
+                    {asset.department?.length > 15 ? asset.department.substring(0, 15) + "..." : asset.department}
                   </td>
                   <td className="px-2 py-2 text-xs text-gray-900 whitespace-nowrap" title={asset.userName}>
-                    {asset.userName?.length > 12 ? asset.userName.substring(0, 12) + "..." : asset.userName}
+                    {asset.userName?.length > 20 ? asset.userName.substring(0, 20) + "..." : asset.userName}
                   </td>
                   <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
                     {asset.brand}
@@ -224,16 +312,99 @@ const AssetTable = ({ assets, currentUser, onEdit, onDelete, viewMode, isAdmin }
         </table>
       </div>
 
-      {/* Table Footer */}
-      <div className="px-3 py-2 bg-gray-50 border-t border-gray-200">
-        <p className="text-xs text-gray-500">
-          Showing{" "}
-          <span className="font-medium text-gray-700">
-            {filteredAssets.length}
-          </span>{" "}
-          of <span className="font-medium text-gray-700">{assets.length}</span>{" "}
-          assets
-        </p>
+      {/* Table Footer with Pagination */}
+      <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          {/* Showing info */}
+          <p className="text-sm text-gray-600">
+            Showing{" "}
+            <span className="font-medium text-gray-900">
+              {totalItems > 0 ? startIndex + 1 : 0}
+            </span>{" "}
+            to{" "}
+            <span className="font-medium text-gray-900">
+              {endIndex}
+            </span>{" "}
+            of{" "}
+            <span className="font-medium text-gray-900">{totalItems}</span>{" "}
+            entries
+            {totalPages > 1 && (
+              <span className="text-gray-500"> (Page {currentPage} of {totalPages})</span>
+            )}
+          </p>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <nav className="flex items-center space-x-1" aria-label="Pagination">
+              {/* First Button */}
+              <button
+                onClick={() => goToPage(1)}
+                disabled={!hasPrevPage}
+                className="px-2 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="First page"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                </svg>
+              </button>
+
+              {/* Previous Button */}
+              <button
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={!hasPrevPage}
+                className="px-2 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Previous page"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+
+              {/* Page Numbers */}
+              {getPageNumbers().map((page, idx) => (
+                page === "..." ? (
+                  <span key={`ellipsis-${idx}`} className="px-2 py-1 text-gray-400">...</span>
+                ) : (
+                  <button
+                    key={page}
+                    onClick={() => goToPage(page)}
+                    className={`min-w-[36px] px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                      currentPage === page
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "text-gray-600 bg-white border border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              ))}
+
+              {/* Next Button */}
+              <button
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={!hasNextPage}
+                className="px-2 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Next page"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+
+              {/* Last Button */}
+              <button
+                onClick={() => goToPage(totalPages)}
+                disabled={!hasNextPage}
+                className="px-2 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Last page"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                </svg>
+              </button>
+            </nav>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -35,7 +35,8 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser }
         : [];
       setCustomBranches(branchNames);
     } catch (error) {
-      console.error("Error fetching custom branches:", error);
+      // Silently handle - use default branches if API fails
+      setCustomBranches([]);
     }
   };
 
@@ -210,20 +211,16 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser }
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   S.No <span className="text-red-500">*</span>
-                  {!editingAsset && <span className="text-gray-400 font-normal ml-1">(Auto-generated)</span>}
+                  <span className="text-gray-400 font-normal ml-1">(Auto-generated)</span>
                 </label>
                 <input
                   type="text"
                   name="serialNumber"
                   value={formData.serialNumber}
-                  onChange={handleChange}
-                  placeholder={editingAsset ? "e.g., OMT-02022026-123" : "Select company to generate"}
-                  readOnly={!editingAsset}
-                  className={`w-full px-3 py-2 text-sm border rounded-lg transition-colors ${
-                    !editingAsset 
-                      ? "bg-gray-50 text-gray-700 cursor-not-allowed" 
-                      : "focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  } ${
+                  readOnly
+                  disabled
+                  placeholder="Select company to generate"
+                  className={`w-full px-3 py-2 text-sm border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed ${
                     errors.serialNumber ? "border-red-500" : "border-gray-300"
                   }`}
                 />

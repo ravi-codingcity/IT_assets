@@ -5,7 +5,7 @@ export const getAllBranches = async () => {
   try {
     const response = await fetch(API_BASE_URL);
     if (!response.ok) {
-      // If API doesn't exist yet, return empty array
+      // If API doesn't exist yet, return empty array silently
       if (response.status === 404) {
         return { data: [] };
       }
@@ -14,8 +14,7 @@ export const getAllBranches = async () => {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error fetching branches:", error);
-    // Return empty array if API is not available
+    // Silently return empty array if API is not available (no console error)
     return { data: [] };
   }
 };

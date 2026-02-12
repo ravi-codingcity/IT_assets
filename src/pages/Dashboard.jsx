@@ -5,7 +5,7 @@ import AssetTable from "../components/AssetTable";
 import AssetFormModal from "../components/AssetFormModal";
 import { companies } from "../data/assets";
 import { useAuth } from "../context/AuthContext";
-import { getAllAssets, createAsset, updateAsset, deleteAsset } from "../services/assetService";
+import { getAllAssets, createAsset, updateAsset, deleteAsset, uploadExcel, getFilterOptions } from "../services/assetService";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -18,16 +18,56 @@ const Dashboard = () => {
   const [selectedDeviceType, setSelectedDeviceType] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Search state (moved from AssetTable for server-side search)
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  // Pagination state
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    itemsPerPage: 20,
+    hasNextPage: false,
+    hasPrevPage: false
+  });
+  
+  // Excel Import states
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: "" });
+  const [importError, setImportError] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Check if user is admin
   const isAdmin = user?.role === "admin";
+  
+  // Track myAssetCount separately (from server when querying user's assets)
+  const [myAssetCount, setMyAssetCount] = useState(0);
 
-  // Fetch assets from API
-  const fetchAssets = useCallback(async (showLoading = true) => {
+  // Fetch assets from API with pagination, search, and filters
+  const fetchAssets = useCallback(async (options = {}) => {
+    const {
+      page = 1,
+      search = searchTerm,
+      companyName = selectedCompany,
+      device = selectedDeviceType,
+      createdBy = "",
+      showLoading = true
+    } = options;
+
     try {
       if (showLoading) setIsLoading(true);
       setError(null);
-      const response = await getAllAssets();
+      const response = await getAllAssets({
+        page,
+        limit: 20,
+        sortBy: "createdAt",
+        order: "desc",
+        search,
+        companyName,
+        device,
+        createdBy
+      });
       
       // Extract assets from API response
       let assetData = [];
@@ -39,14 +79,24 @@ const Dashboard = () => {
         assetData = response;
       }
       
-      // Sort by updatedAt (newest first)
-      const sortedAssets = [...assetData].sort((a, b) => {
-        const dateA = new Date(a.updatedAt || a.createdAt || 0);
-        const dateB = new Date(b.updatedAt || b.createdAt || 0);
-        return dateB - dateA;
-      });
+      // Update pagination state from API response
+      if (response?.data?.pagination) {
+        setPagination({
+          currentPage: response.data.pagination.currentPage || 1,
+          totalPages: response.data.pagination.totalPages || 1,
+          totalItems: response.data.pagination.totalItems || assetData.length,
+          itemsPerPage: response.data.pagination.itemsPerPage || 20,
+          hasNextPage: response.data.pagination.hasNextPage || false,
+          hasPrevPage: response.data.pagination.hasPrevPage || false
+        });
+        
+        // Update myAssetCount when fetching user's assets
+        if (createdBy && response.data.pagination.totalItems !== undefined) {
+          setMyAssetCount(response.data.pagination.totalItems);
+        }
+      }
       
-      setAssets(sortedAssets);
+      setAssets(assetData);
     } catch (err) {
       console.error("Error fetching assets:", err);
       setError("Failed to load assets. Please check if the API server is running.");
@@ -54,43 +104,79 @@ const Dashboard = () => {
     } finally {
       if (showLoading) setIsLoading(false);
     }
-  }, []);
+  }, [searchTerm, selectedCompany, selectedDeviceType]);
 
-  // Initial fetch and auto-refresh every 30 seconds
+  // Handle page change (maintain current filters including createdBy for Mine view)
+  const handlePageChange = useCallback((newPage) => {
+    const createdByFilter = viewMode === "my" ? user?._id : "";
+    fetchAssets({ page: newPage, createdBy: createdByFilter });
+  }, [fetchAssets, viewMode, user?._id]);
+
+  // Handle search change - server-side search
+  const handleSearch = useCallback((term) => {
+    setSearchTerm(term);
+    const createdByFilter = viewMode === "my" ? user?._id : "";
+    fetchAssets({ page: 1, search: term, createdBy: createdByFilter });
+  }, [fetchAssets, viewMode, user?._id]);
+
+  // Handle company filter change
+  const handleCompanyFilter = useCallback((company) => {
+    setSelectedCompany(company);
+    const createdByFilter = viewMode === "my" ? user?._id : "";
+    fetchAssets({ page: 1, companyName: company, createdBy: createdByFilter });
+  }, [fetchAssets, viewMode, user?._id]);
+
+  // Handle device type filter change
+  const handleDeviceTypeFilter = useCallback((device) => {
+    setSelectedDeviceType(device);
+    const createdByFilter = viewMode === "my" ? user?._id : "";
+    fetchAssets({ page: 1, device: device, createdBy: createdByFilter });
+  }, [fetchAssets, viewMode, user?._id]);
+
+  // Initial fetch on mount
   useEffect(() => {
-    fetchAssets();
-    
-    // Auto-refresh every 30 seconds for real-time updates
-    const refreshInterval = setInterval(() => {
-      fetchAssets(false); // Silent refresh without loading spinner
-    }, 30000);
-    
-    return () => clearInterval(refreshInterval);
-  }, [fetchAssets]);
+    fetchAssets({ page: 1 });
+    // Also fetch user's asset count for "Mine" badge
+    const fetchMyAssetCount = async () => {
+      try {
+        const response = await getAllAssets({
+          page: 1,
+          limit: 1,
+          createdBy: user?._id
+        });
+        if (response?.data?.pagination?.totalItems !== undefined) {
+          setMyAssetCount(response.data.pagination.totalItems);
+        }
+      } catch (err) {
+        console.error("Error fetching my asset count:", err);
+      }
+    };
+    if (user?._id) {
+      fetchMyAssetCount();
+    }
+  }, [user?._id]);
+
+  // Handle viewMode change - refetch with appropriate filter
+  useEffect(() => {
+    if (viewMode === "my" && user?._id) {
+      fetchAssets({ page: 1, createdBy: user._id });
+    } else if (viewMode === "all") {
+      fetchAssets({ page: 1, createdBy: "" });
+    }
+  }, [viewMode, user?._id]);
 
   // Get filtered assets based on role and view mode
+  // Note: With server-side pagination, filtering should ideally be done on the backend
+  // Client-side filters here only affect the current page view
   const getFilteredAssets = () => {
     let filtered = assets;
 
-    // Role-based filtering:
-    // - Admin in "all" mode: sees all assets
-    // - Admin in "my" mode: sees only their own assets
-    // - Non-admin: always sees only their own assets
-    if (isAdmin) {
-      if (viewMode === "my") {
-        filtered = filtered.filter((a) => a.createdBy === user?._id);
-      }
-    } else {
-      // Non-admin users only see their own entries
-      filtered = filtered.filter((a) => a.createdBy === user?._id);
-    }
-
-    // Apply company filter
+    // Apply company filter (client-side, affects current page only)
     if (selectedCompany) {
       filtered = filtered.filter((a) => a.companyName === selectedCompany);
     }
 
-    // Apply device type filter
+    // Apply device type filter (client-side, affects current page only)
     if (selectedDeviceType) {
       filtered = filtered.filter((a) => a.device === selectedDeviceType);
     }
@@ -102,35 +188,24 @@ const Dashboard = () => {
 
   // Calculate counts based on current view
   const getCountsForCurrentView = () => {
-    let baseAssets = assets;
-
-    if (isAdmin && viewMode === "my") {
-      baseAssets = assets.filter((a) => a.createdBy === user?._id);
-    } else if (!isAdmin) {
-      baseAssets = assets.filter((a) => a.createdBy === user?._id);
-    }
-
-    if (selectedCompany) {
-      baseAssets = baseAssets.filter((a) => a.companyName === selectedCompany);
-    }
-
+    // Use pagination.totalItems for total count (all pages)
+    // Device type counts will only be accurate for current page
+    // For accurate device counts, backend would need to provide these
     return {
-      total: baseAssets.length,
-      laptops: baseAssets.filter((a) => a.device === "Laptop").length,
-      desktops: baseAssets.filter((a) => a.device === "Desktop").length,
-      printers: baseAssets.filter((a) => a.device === "Printer").length,
+      total: pagination.totalItems || assets.length,
+      laptops: assets.filter((a) => a.device === "Laptop").length,
+      desktops: assets.filter((a) => a.device === "Desktop").length,
+      printers: assets.filter((a) => a.device === "Printer").length,
     };
   };
 
   const counts = getCountsForCurrentView();
-  const myAssetCount = assets.filter((a) => a.createdBy === user?._id).length;
 
   // Export currently displayed assets to Excel (admin only)
   const handleExportToExcel = () => {
     if (!isAdmin || !displayedAssets.length) return;
 
-    const exportData = displayedAssets.map((asset, index) => ({
-      "S.No": asset.serialNumber || index + 1,
+    const exportData = displayedAssets.map((asset) => ({
       "Company": asset.companyName || "",
       "Branch": asset.branch || "",
       "Department": asset.department || "",
@@ -147,6 +222,154 @@ const Dashboard = () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "IT Assets");
     XLSX.writeFile(workbook, "IT_Assets.xlsx");
+  };
+
+  // Handle Excel file import - Server-side processing
+  const handleImportFromExcel = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.ms-excel', // .xls
+      'text/csv' // .csv
+    ];
+    const validExtensions = ['.xlsx', '.xls', '.csv'];
+    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    if (!validTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
+      setImportError("Invalid file type. Please upload an Excel file (.xlsx, .xls) or CSV file.");
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      setImportError("File too large. Maximum file size is 10MB.");
+      return;
+    }
+
+    setIsImporting(true);
+    setImportError(null);
+    setImportProgress({ current: 0, total: 100, status: "Reading file..." });
+
+    try {
+      // First, let's read and preview the Excel file to debug
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer);
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      
+      console.log("Excel sheet name:", sheetName);
+      console.log("Excel columns:", jsonData.length > 0 ? Object.keys(jsonData[0]) : "No data");
+      console.log("First row data:", jsonData[0]);
+      console.log("Total rows:", jsonData.length);
+      
+      if (jsonData.length === 0) {
+        throw new Error("Excel file is empty or has no data rows");
+      }
+
+      setImportProgress({ current: 0, total: 100, status: "Uploading file to server..." });
+      console.log(`Uploading file: ${file.name}, size: ${file.size} bytes`);
+      
+      // Upload file to server for processing
+      const result = await uploadExcel(file, user?._id);
+      
+      console.log("Upload result:", result);
+
+      if (result.success) {
+        const imported = result.data?.imported || result.data?.created || 0;
+        const failed = result.data?.failed || 0;
+        const total = imported + failed;
+        
+        setImportProgress({ 
+          current: imported, 
+          total: total, 
+          status: `Complete! ${imported} records imported${failed > 0 ? `, ${failed} failed` : ''}.` 
+        });
+
+        // Show errors if any
+        if (result.data?.errors && result.data.errors.length > 0) {
+          console.log("Import errors:", result.data.errors);
+        }
+        
+        // Refresh the assets list from page 1 (respecting current view mode)
+        const createdByFilter = viewMode === "my" ? user?._id : "";
+        await fetchAssets({ page: 1, createdBy: createdByFilter });
+        
+        // Update myAssetCount with imported records
+        if (imported > 0) {
+          setMyAssetCount(prev => prev + imported);
+        }
+      } else {
+        throw new Error(result.message || "Upload failed");
+      }
+
+      
+      // Close modal after short delay to show completion
+      setTimeout(() => {
+        setShowImportModal(false);
+        setIsImporting(false);
+        setImportProgress({ current: 0, total: 0, status: "" });
+      }, 2000);
+
+    } catch (err) {
+      console.error("Error importing Excel:", err);
+      setImportError(err.message || "Failed to import Excel file");
+      setIsImporting(false);
+    }
+
+    // Reset file input
+    event.target.value = "";
+  };
+
+  // Download sample Excel template
+  const downloadSampleTemplate = () => {
+    const sampleData = [
+      {
+        "Company": "OmTrans",
+        "Branch": "Delhi H.O",
+        "Department": "IT",
+        "User": "John Doe",
+        "Brand": "Dell",
+        "Device": "Laptop",
+        "Device S.No": "ABC123XYZ",
+        "Operating System": "Windows 11",
+        "Purchase Date": "2024-01-15",
+        "Remark": "New device"
+      },
+      {
+        "Company": "TGL",
+        "Branch": "Mumbai",
+        "Department": "Finance",
+        "User": "Jane Smith",
+        "Brand": "HP",
+        "Device": "Desktop",
+        "Device S.No": "HP456DEF",
+        "Operating System": "Windows 10",
+        "Purchase Date": "2023-06-20",
+        "Remark": ""
+      },
+      {
+        "Company": "OmTrax",
+        "Branch": "Kolkata",
+        "Department": "Operations",
+        "User": "Mike Wilson",
+        "Brand": "Lenovo",
+        "Device": "Laptop",
+        "Device S.No": "LN789GHI",
+        "Operating System": "Windows 11",
+        "Purchase Date": "2024-12-05",
+        "Remark": "Upgraded model"
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(sampleData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sample Assets");
+    XLSX.writeFile(workbook, "IT_Assets_Import_Template.xlsx");
   };
 
   const deviceTabs = [
@@ -198,8 +421,11 @@ const Dashboard = () => {
         createdBy: user?._id,
       };
       await createAsset(assetData);
-      await fetchAssets();
+      const createdByFilter = viewMode === "my" ? user?._id : "";
+      await fetchAssets({ page: 1, createdBy: createdByFilter });
       setIsModalOpen(false);
+      // Update myAssetCount since we added a new asset
+      setMyAssetCount(prev => prev + 1);
     } catch (err) {
       console.error("Error creating asset:", err);
       setError("Failed to create asset. Please try again.");
@@ -213,7 +439,8 @@ const Dashboard = () => {
       const assetId = editingAsset._id || editingAsset.id;
       await updateAsset(assetId, formData);
       // Refresh the asset list from API to ensure we have the correct data
-      await fetchAssets();
+      const createdByFilter = viewMode === "my" ? user?._id : "";
+      await fetchAssets({ page: pagination.currentPage, createdBy: createdByFilter });
       setEditingAsset(null);
       setIsModalOpen(false);
     } catch (err) {
@@ -227,8 +454,11 @@ const Dashboard = () => {
     try {
       setError(null);
       await deleteAsset(assetId);
-      await fetchAssets();
+      const createdByFilter = viewMode === "my" ? user?._id : "";
+      await fetchAssets({ page: pagination.currentPage, createdBy: createdByFilter });
       setShowDeleteConfirm(null);
+      // Update myAssetCount since we deleted an asset
+      setMyAssetCount(prev => Math.max(0, prev - 1));
     } catch (err) {
       console.error("Error deleting asset:", err);
       setError("Failed to delete asset. Please try again.");
@@ -288,7 +518,11 @@ const Dashboard = () => {
           </div>
           <div className="flex items-center space-x-3 mt-4 sm:mt-0">
             <button
-              onClick={fetchAssets}
+              onClick={() => { 
+                setSearchTerm(""); 
+                const createdByFilter = viewMode === "my" ? user?._id : "";
+                fetchAssets({ page: 1, search: "", createdBy: createdByFilter }); 
+              }}
               disabled={isLoading}
               className="inline-flex items-center px-4 py-2.5 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 transition-colors border border-gray-300"
               title="Refresh assets"
@@ -346,7 +580,30 @@ const Dashboard = () => {
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4 4m0 0l4-4m-4 4V4"
                   />
                 </svg>
-                Export Excel
+                Export
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => setShowImportModal(true)}
+                disabled={isLoading}
+                className="inline-flex items-center px-5 py-2.5 bg-violet-600 text-white font-medium rounded-lg hover:bg-violet-700 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 transition-colors shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Import assets from Excel file"
+              >
+                <svg
+                  className="h-5 w-5 mr-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 8l-4-4m0 0L8 8m4-4v12"
+                  />
+                </svg>
+                Import
               </button>
             )}
           </div>
@@ -458,7 +715,7 @@ const Dashboard = () => {
                     <span className={`px-1.5 py-0.5 text-xs rounded-full ${
                       viewMode === "all" ? "bg-blue-100 text-blue-600" : "bg-gray-200 text-gray-500"
                     }`}>
-                      {assets.length}
+                      {pagination.totalItems}
                     </span>
                   </button>
                   <button
@@ -514,6 +771,10 @@ const Dashboard = () => {
               onDelete={(asset) => setShowDeleteConfirm(asset._id || asset.id)}
               viewMode={viewMode}
               isAdmin={isAdmin}
+              pagination={pagination}
+              onPageChange={handlePageChange}
+              searchTerm={searchTerm}
+              onSearch={handleSearch}
           />
         )}
       </main>
@@ -580,6 +841,129 @@ const Dashboard = () => {
                   Delete
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+            onClick={() => !isImporting && setShowImportModal(false)}
+          ></div>
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-violet-100 rounded-lg">
+                    <svg className="h-6 w-6 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Import from Excel</h3>
+                    <p className="text-sm text-gray-500">Upload an Excel file to import assets</p>
+                  </div>
+                </div>
+                {!isImporting && (
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Error Message */}
+              {importError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2">
+                  <svg className="h-5 w-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <span className="text-red-600 text-sm">{importError}</span>
+                </div>
+              )}
+
+              {/* Import Progress */}
+              {isImporting ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-center">
+                    <svg className="animate-spin h-10 w-10 text-violet-600" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-gray-700">{importProgress.status}</p>
+                    {importProgress.total > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {importProgress.current} of {importProgress.total} records
+                      </p>
+                    )}
+                  </div>
+                  {importProgress.total > 0 && (
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-violet-600 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Expected Columns Info */}
+                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Required Excel column headers:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {["Company", "Branch", "Department", "User", "Brand", "Device", "Device S.No", "Operating System", "Purchase Date", "Remark"].map((col) => (
+                        <span key={col} className="px-2 py-1 bg-white text-xs text-gray-600 rounded border border-gray-300">
+                          {col}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-3">
+                      <strong>Note:</strong> Serial Number (S.No) will be auto-generated. Date format: YYYY-MM-DD or DD-MM-YYYY
+                    </p>
+                  </div>
+
+                  {/* Download Template */}
+                  <button
+                    onClick={downloadSampleTemplate}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors border border-gray-300"
+                  >
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4 4m0 0l4-4m-4 4V4" />
+                    </svg>
+                    <span>Download Sample Template</span>
+                  </button>
+
+                  {/* File Upload */}
+                  <label className="block">
+                    <div className="flex items-center justify-center w-full h-32 px-4 border-2 border-dashed border-violet-300 rounded-lg cursor-pointer bg-violet-50 hover:bg-violet-100 transition-colors">
+                      <div className="text-center">
+                        <svg className="mx-auto h-10 w-10 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p className="mt-2 text-sm text-violet-600 font-medium">Click to upload file</p>
+                        <p className="text-xs text-gray-500">.xlsx, .xls, .csv files supported</p>
+                      </div>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleImportFromExcel}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              )}
             </div>
           </div>
         </div>

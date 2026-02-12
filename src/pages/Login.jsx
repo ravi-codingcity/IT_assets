@@ -131,7 +131,7 @@ const Login = () => {
               )}
             </button>
 
-            {/* Links */}
+            {/* Links 
             <div className="flex items-center justify-between mt-4 text-sm">
               <Link 
                 to="/reset-password" 
@@ -145,7 +145,8 @@ const Login = () => {
               >
                 Create Account
               </Link>
-            </div>
+            </div> */}
+            
           </form>
         </div>
 

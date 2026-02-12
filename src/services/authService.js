@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:5000/api/v1/auth";
+const API_BASE_URL = "https://it-assets-backend.onrender.com/api/v1/auth";
 
 // Login user
 export const loginUser = async (username, password) => {

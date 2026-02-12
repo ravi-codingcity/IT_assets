@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:5000/api/v1/branches";
+const API_BASE_URL = "https://it-assets-backend.onrender.com/api/v1/branches";
 
 // Get all branches from database
 export const getAllBranches = async () => {

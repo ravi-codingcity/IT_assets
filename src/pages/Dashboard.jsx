@@ -469,8 +469,10 @@ const Dashboard = () => {
   const handleAddAsset = async (formData) => {
     try {
       setError(null);
+      // Remove serialNumber - backend will auto-generate it
+      const { serialNumber, ...dataWithoutSerial } = formData;
       const assetData = {
-        ...formData,
+        ...dataWithoutSerial,
         createdBy: user?._id,
       };
       await createAsset(assetData);

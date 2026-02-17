@@ -242,7 +242,7 @@ const AssetTable = ({
                     </span>
                   </td>
                   <td className="px-2 py-2 text-xs text-gray-600 font-mono whitespace-nowrap" title={asset.deviceSerialNo}>
-                    {asset.deviceSerialNo?.length > 14 ? asset.deviceSerialNo.substring(0, 14) + "..." : asset.deviceSerialNo}
+                    {asset.deviceSerialNo?.length > 20 ? asset.deviceSerialNo.substring(0, 20) + "..." : asset.deviceSerialNo}
                   </td>
                   <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap" title={asset.operatingSystem}>
                     {asset.operatingSystem?.length > 12 ? asset.operatingSystem.substring(0, 12) + "..." : asset.operatingSystem}

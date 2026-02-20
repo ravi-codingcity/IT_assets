@@ -82,6 +82,21 @@ const Dashboard = () => {
   // Ref for debounce timer
   const searchDebounceRef = useRef(null);
 
+  // Format date to DD-MM-YYYY format
+  const formatDateForExport = (dateString) => {
+    if (!dateString) return "";
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      const day = String(date.getDate()).padStart(2, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const year = date.getFullYear();
+      return `${day}-${month}-${year}`;
+    } catch {
+      return dateString;
+    }
+  };
+
   // Sort assets by createdAt descending (newest first)
   const sortAssetsByCreatedAt = (assets) => {
     return [...assets].sort((a, b) => {
@@ -163,10 +178,10 @@ const Dashboard = () => {
   // Handle page change (maintain current filters including createdBy for Mine view)
   const handlePageChange = useCallback(
     (newPage) => {
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       fetchAssets({ page: newPage, createdBy: createdByFilter });
     },
-    [fetchAssets, viewMode, user?._id],
+    [fetchAssets, viewMode, user?._id, isAdmin],
   );
 
   // Handle search change - server-side search with debounce
@@ -181,11 +196,11 @@ const Dashboard = () => {
       
       // Debounce the API call - wait 400ms after user stops typing
       searchDebounceRef.current = setTimeout(() => {
-        const createdByFilter = viewMode === "my" ? user?._id : "";
+        const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
         fetchAssets({ page: 1, search: term, createdBy: createdByFilter });
       }, 400);
     },
-    [fetchAssets, viewMode, user?._id],
+    [fetchAssets, viewMode, user?._id, isAdmin],
   );
 
   // Cleanup debounce timer on unmount
@@ -201,30 +216,29 @@ const Dashboard = () => {
   const handleCompanyFilter = useCallback(
     (company) => {
       setSelectedCompany(company);
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       fetchAssets({
         page: 1,
         companyName: company,
         createdBy: createdByFilter,
       });
     },
-    [fetchAssets, viewMode, user?._id],
+    [fetchAssets, viewMode, user?._id, isAdmin],
   );
 
   // Handle device type filter change
   const handleDeviceTypeFilter = useCallback(
     (device) => {
       setSelectedDeviceType(device);
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       fetchAssets({ page: 1, device: device, createdBy: createdByFilter });
     },
-    [fetchAssets, viewMode, user?._id],
+    [fetchAssets, viewMode, user?._id, isAdmin],
   );
 
-  // Initial fetch on mount
+  // Initial fetch of user's asset count for "Mine" badge
+  // Note: Main asset fetch is handled by the viewMode effect below to ensure proper role-based filtering
   useEffect(() => {
-    fetchAssets({ page: 1 });
-    // Also fetch user's asset count for "Mine" badge
     const fetchMyAssetCount = async () => {
       try {
         const response = await getAllAssets({
@@ -245,26 +259,34 @@ const Dashboard = () => {
   }, [user?._id]);
 
   // Fetch device counts from server (updates when company filter changes)
+  // Regular users see only their own counts
   useEffect(() => {
     const fetchDeviceCounts = async () => {
       try {
-        const counts = await getAssetCounts(selectedCompany);
+        const createdByFilter = !isAdmin ? user?._id : "";
+        const counts = await getAssetCounts(selectedCompany, createdByFilter);
         setDeviceCounts(counts);
       } catch (err) {
         console.error("Error fetching device counts:", err);
       }
     };
     fetchDeviceCounts();
-  }, [selectedCompany]);
+  }, [selectedCompany, isAdmin, user?._id]);
 
   // Handle viewMode change - refetch with appropriate filter
+  // Regular users always see only their own entries
   useEffect(() => {
-    if (viewMode === "my" && user?._id) {
+    if (!isAdmin) {
+      // Regular users always filter by their own createdBy
+      if (user?._id) {
+        fetchAssets({ page: 1, createdBy: user._id });
+      }
+    } else if (viewMode === "my" && user?._id) {
       fetchAssets({ page: 1, createdBy: user._id });
     } else if (viewMode === "all") {
       fetchAssets({ page: 1, createdBy: "" });
     }
-  }, [viewMode, user?._id]);
+  }, [viewMode, user?._id, isAdmin]);
 
   // Get filtered assets based on role and view mode
   // Note: With server-side pagination, filtering should ideally be done on the backend
@@ -291,10 +313,12 @@ const Dashboard = () => {
   const counts = deviceCounts;
 
   // Fetch export counts when export modal opens
+  // Regular users see only their own counts
   const fetchExportCounts = async () => {
     setIsLoadingExportCounts(true);
     try {
       const API_BASE_URL = "https://it-assets-backend.onrender.com/api/v1/assets";
+      const createdByFilter = !isAdmin ? user?._id : "";
       const buildParams = (filters = {}) => {
         const params = new URLSearchParams({
           page: "1",
@@ -305,6 +329,7 @@ const Dashboard = () => {
         });
         if (filters.device) params.append("device", filters.device);
         if (filters.companyName) params.append("companyName", filters.companyName);
+        if (createdByFilter) params.append("createdBy", createdByFilter);
         return params;
       };
 
@@ -349,6 +374,7 @@ const Dashboard = () => {
   };
 
   // Export data based on selection
+  // Regular users export only their own data
   const handleExportData = async (exportType) => {
     setIsExporting(true);
     try {
@@ -360,6 +386,11 @@ const Dashboard = () => {
         order: "desc",
         _t: Date.now().toString(),
       });
+
+      // Regular users can only export their own data
+      if (!isAdmin && user?._id) {
+        params.append("createdBy", user._id);
+      }
 
       let fileName = "IT_Assets";
       switch (exportType) {
@@ -412,7 +443,7 @@ const Dashboard = () => {
         Device: asset.device || "",
         "Device S.No": asset.deviceSerialNo || "",
         "Operating System": asset.operatingSystem || "",
-        "Purchase Date": asset.dateOfPurchase || "",
+        "Purchase Date": formatDateForExport(asset.dateOfPurchase),
         Remark: asset.remark || "",
       }));
 
@@ -443,7 +474,7 @@ const Dashboard = () => {
       Device: asset.device || "",
       "Device S.No": asset.deviceSerialNo || "",
       "Operating System": asset.operatingSystem || "",
-      "Purchase Date": asset.dateOfPurchase || "",
+      "Purchase Date": formatDateForExport(asset.dateOfPurchase),
       Remark: asset.remark || "",
     }));
 
@@ -539,7 +570,7 @@ const Dashboard = () => {
         }
 
         // Refresh the assets list from page 1 (respecting current view mode)
-        const createdByFilter = viewMode === "my" ? user?._id : "";
+        const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
         await fetchAssets({ page: 1, createdBy: createdByFilter });
 
         // Update myAssetCount with imported records
@@ -734,14 +765,16 @@ const Dashboard = () => {
   };
 
   // Refresh device counts from server
+  // Regular users see only their own counts
   const refreshCounts = useCallback(async () => {
     try {
-      const counts = await getAssetCounts(selectedCompany);
+      const createdByFilter = !isAdmin ? user?._id : "";
+      const counts = await getAssetCounts(selectedCompany, createdByFilter);
       setDeviceCounts(counts);
     } catch (err) {
       console.error("Error refreshing counts:", err);
     }
-  }, [selectedCompany]);
+  }, [selectedCompany, isAdmin, user?._id]);
 
   // Handle adding new asset
   const handleAddAsset = async (formData) => {
@@ -762,7 +795,7 @@ const Dashboard = () => {
         delete assetData.serialNumber;
       }
       const response = await createAsset(assetData);
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       await fetchAssets({ page: 1, createdBy: createdByFilter });
       setIsModalOpen(false);
 
@@ -792,7 +825,7 @@ const Dashboard = () => {
       const assetId = editingAsset._id || editingAsset.id;
       await updateAsset(assetId, formData);
       // Refresh the asset list from API to ensure we have the correct data
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       await fetchAssets({
         page: pagination.currentPage,
         createdBy: createdByFilter,
@@ -812,7 +845,7 @@ const Dashboard = () => {
     try {
       setError(null);
       await deleteAsset(assetId);
-      const createdByFilter = viewMode === "my" ? user?._id : "";
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       await fetchAssets({
         page: pagination.currentPage,
         createdBy: createdByFilter,
@@ -945,14 +978,15 @@ const Dashboard = () => {
             <button
               onClick={async () => {
                 setSearchTerm("");
-                const createdByFilter = viewMode === "my" ? user?._id : "";
+                const createdByFilter = !isAdmin ? user?._id : (viewMode === "my" ? user?._id : "");
                 await fetchAssets({
                   page: 1,
                   search: "",
                   createdBy: createdByFilter,
                 });
                 // Also refresh counts
-                const counts = await getAssetCounts(selectedCompany);
+                const countsFilter = !isAdmin ? user?._id : "";
+                const counts = await getAssetCounts(selectedCompany, countsFilter);
                 setDeviceCounts(counts);
               }}
               disabled={isLoading}
@@ -992,13 +1026,12 @@ const Dashboard = () => {
               </svg>
               Add Entry
             </button>
-            {isAdmin && (
-              <button
-                onClick={handleOpenExportModal}
-                disabled={isLoading}
-                className="inline-flex items-center px-5 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-colors shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-                title="Export assets to Excel"
-              >
+            <button
+              onClick={handleOpenExportModal}
+              disabled={isLoading}
+              className="inline-flex items-center px-5 py-2.5 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 transition-colors shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Export assets to Excel"
+            >
                 <svg
                   className="h-5 w-5 mr-2"
                   fill="none"
@@ -1014,7 +1047,6 @@ const Dashboard = () => {
                 </svg>
                 Export
               </button>
-            )}
             {/* Import Button Hide
             {isAdmin && (
               <button
@@ -1406,13 +1438,13 @@ const Dashboard = () => {
                 </div>
               ) : (
                 <>
-                  {/* All Assets - Full width */}
+                  {/* All/My Assets - Full width */}
                   <button
                     onClick={() => handleExportData("total")}
                     disabled={isExporting || exportCounts.total === 0}
                     className="w-full flex items-center justify-between px-3 py-2.5 mb-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-blue-200"
                   >
-                    <span className="font-medium text-blue-700">All Assets</span>
+                    <span className="font-medium text-blue-700">{isAdmin ? "All Assets" : "My Assets"}</span>
                     <span className="text-xs font-bold text-blue-600 bg-blue-200 px-2 py-0.5 rounded-full">{exportCounts.total}</span>
                   </button>
 

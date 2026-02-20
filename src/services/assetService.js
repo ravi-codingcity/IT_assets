@@ -75,8 +75,8 @@ export const getFilterOptions = async () => {
   }
 };
 
-// Get asset counts (total and by device type) with optional company filter
-export const getAssetCounts = async (companyName = "") => {
+// Get asset counts (total and by device type) with optional company and createdBy filter
+export const getAssetCounts = async (companyName = "", createdBy = "") => {
   try {
     const baseParams = {
       page: 1,
@@ -93,6 +93,7 @@ export const getAssetCounts = async (companyName = "") => {
       });
       if (companyName) params.append("companyName", companyName);
       if (device) params.append("device", device);
+      if (createdBy) params.append("createdBy", createdBy);
       return params;
     };
 

@@ -1,0 +1,58 @@
+const API_BASE_URL = "https://it-assets-backend.onrender.com/api/v1/departments";
+
+// Get all departments from database
+export const getAllDepartments = async () => {
+  try {
+    const response = await fetch(API_BASE_URL);
+    if (!response.ok) {
+      // If API doesn't exist yet, return empty array silently
+      if (response.status === 404) {
+        return { data: [] };
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Silently return empty array if API is not available (no console error)
+    return { data: [] };
+  }
+};
+
+// Create new department
+export const createDepartment = async (departmentName) => {
+  try {
+    const response = await fetch(API_BASE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: departmentName }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error creating department:", error);
+    throw error;
+  }
+};
+
+// Delete department
+export const deleteDepartment = async (id) => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error deleting department:", error);
+    throw error;
+  }
+};

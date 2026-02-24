@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import Navbar from "../components/Navbar";
 import AssetTable from "../components/AssetTable";
 import AssetFormModal from "../components/AssetFormModal";
-import { companies } from "../data/assets";
+import { companies, branches } from "../data/assets";
 import { useAuth } from "../context/AuthContext";
 import {
   getAllAssets,
@@ -23,6 +23,7 @@ const Dashboard = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
   const [viewMode, setViewMode] = useState("all"); // "all" or "my"
   const [selectedCompany, setSelectedCompany] = useState("");
+  const [selectedBranch, setSelectedBranch] = useState("");
   const [selectedDeviceType, setSelectedDeviceType] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -113,6 +114,7 @@ const Dashboard = () => {
         page = 1,
         search = searchTerm,
         companyName = selectedCompany,
+        branch = selectedBranch,
         device = selectedDeviceType,
         createdBy = "",
         showLoading = true,
@@ -128,6 +130,7 @@ const Dashboard = () => {
           order: "desc",
           search,
           companyName,
+          branch,
           device,
           createdBy,
         });
@@ -172,7 +175,7 @@ const Dashboard = () => {
         if (showLoading) setIsLoading(false);
       }
     },
-    [searchTerm, selectedCompany, selectedDeviceType],
+    [searchTerm, selectedCompany, selectedBranch, selectedDeviceType],
   );
 
   // Handle page change (maintain current filters including createdBy for Mine view)
@@ -232,6 +235,20 @@ const Dashboard = () => {
       setSelectedDeviceType(device);
       const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
       fetchAssets({ page: 1, device: device, createdBy: createdByFilter });
+    },
+    [fetchAssets, viewMode, user?._id, isAdmin],
+  );
+
+  // Handle branch filter change
+  const handleBranchFilter = useCallback(
+    (branch) => {
+      setSelectedBranch(branch);
+      const createdByFilter = (!isAdmin || viewMode === "my") ? user?._id : "";
+      fetchAssets({
+        page: 1,
+        branch: branch,
+        createdBy: createdByFilter,
+      });
     },
     [fetchAssets, viewMode, user?._id, isAdmin],
   );
@@ -1186,6 +1203,80 @@ const Dashboard = () => {
               {selectedCompany && (
                 <button
                   onClick={() => setSelectedCompany("")}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Clear filter"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
+
+              {/* Branch Filter */}
+              <div className="flex items-center gap-2 text-gray-600 ml-4">
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+                <span className="text-sm font-medium">Branch</span>
+              </div>
+              <div className="relative">
+                <select
+                  value={selectedBranch}
+                  onChange={(e) => handleBranchFilter(e.target.value)}
+                  className="appearance-none pl-4 pr-10 py-2 text-sm font-medium bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all cursor-pointer hover:bg-gray-100"
+                >
+                  <option value="">All Branches</option>
+                  {branches.map((branch) => (
+                    <option key={branch} value={branch}>
+                      {branch}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg
+                    className="h-4 w-4 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </div>
+              </div>
+              {selectedBranch && (
+                <button
+                  onClick={() => handleBranchFilter("")}
                   className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Clear filter"
                 >

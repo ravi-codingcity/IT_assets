@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { companies, deviceTypes, branches as defaultBranches, departments, brands, operatingSystems } from "../data/assets";
+import { companies, deviceTypes, branches as defaultBranches, departments as defaultDepartments, brands, operatingSystems } from "../data/assets";
 import { getAllBranches, createBranch } from "../services/branchService";
+import { getAllDepartments, createDepartment } from "../services/departmentService";
 
 const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, isAdmin = false }) => {
   const [formData, setFormData] = useState({
@@ -22,8 +23,17 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, 
   const [customBranchValue, setCustomBranchValue] = useState("");
   const [branchLoading, setBranchLoading] = useState(false);
 
+  // Department custom input states
+  const [customDepartments, setCustomDepartments] = useState([]);
+  const [showCustomDepartmentInput, setShowCustomDepartmentInput] = useState(false);
+  const [customDepartmentValue, setCustomDepartmentValue] = useState("");
+  const [departmentLoading, setDepartmentLoading] = useState(false);
+
   // Combined branch list (default + custom from database)
   const allBranches = [...new Set([...defaultBranches, ...customBranches])];
+
+  // Combined department list (default + custom from database)
+  const allDepartments = [...new Set([...defaultDepartments, ...customDepartments])];
 
   // Fetch custom branches from database
   const fetchCustomBranches = async () => {
@@ -40,9 +50,25 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, 
     }
   };
 
+  // Fetch custom departments from database
+  const fetchCustomDepartments = async () => {
+    try {
+      const response = await getAllDepartments();
+      const deptData = response.data || response.departments || response || [];
+      const deptNames = Array.isArray(deptData) 
+        ? deptData.map(d => typeof d === 'string' ? d : d.name).filter(Boolean)
+        : [];
+      setCustomDepartments(deptNames);
+    } catch (error) {
+      // Silently handle - use default departments if API fails
+      setCustomDepartments([]);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchCustomBranches();
+      fetchCustomDepartments();
     }
   }, [isOpen]);
 
@@ -79,6 +105,8 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, 
     setErrors({});
     setShowCustomBranchInput(false);
     setCustomBranchValue("");
+    setShowCustomDepartmentInput(false);
+    setCustomDepartmentValue("");
   }, [editingAsset, isOpen]);
 
   const validateForm = () => {
@@ -109,7 +137,13 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validateForm()) {
-      onSubmit(formData);
+      // Create a copy of formData and handle optional fields
+      const submitData = { ...formData };
+      // Remove dateOfPurchase if empty to avoid backend parsing errors
+      if (!submitData.dateOfPurchase || submitData.dateOfPurchase.trim() === "") {
+        delete submitData.dateOfPurchase;
+      }
+      onSubmit(submitData);
       onClose();
     }
   };
@@ -321,21 +355,92 @@ const AssetFormModal = ({ isOpen, onClose, onSubmit, editingAsset, currentUser, 
                 <label className="block text-xs font-medium text-gray-700 mb-1">
                   Department <span className="text-red-500">*</span>
                 </label>
-                <select
-                  name="department"
-                  value={formData.department}
-                  onChange={handleChange}
-                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
-                    errors.department ? "border-red-500" : "border-gray-300"
-                  }`}
-                >
-                  <option value="">Select department</option>
-                  {departments.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
+                {!showCustomDepartmentInput ? (
+                  <div className="space-y-1">
+                    <select
+                      name="department"
+                      value={formData.department}
+                      onChange={handleChange}
+                      className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white transition-colors ${
+                        errors.department ? "border-red-500" : "border-gray-300"
+                      }`}
+                    >
+                      <option value="">Select department</option>
+                      {allDepartments.map((dept) => (
+                        <option key={dept} value={dept}>
+                          {dept}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomDepartmentInput(true)}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                    >
+                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add custom department
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={customDepartmentValue}
+                        onChange={(e) => setCustomDepartmentValue(e.target.value)}
+                        placeholder="Enter custom department name"
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        disabled={departmentLoading}
+                        onClick={async () => {
+                          if (customDepartmentValue.trim()) {
+                            setDepartmentLoading(true);
+                            try {
+                              // Save to database
+                              await createDepartment(customDepartmentValue.trim());
+                              // Update local state
+                              setCustomDepartments(prev => [...prev, customDepartmentValue.trim()]);
+                              setFormData((prev) => ({ ...prev, department: customDepartmentValue.trim() }));
+                              setCustomDepartmentValue("");
+                              setShowCustomDepartmentInput(false);
+                              if (errors.department) {
+                                setErrors((prev) => ({ ...prev, department: "" }));
+                              }
+                            } catch (error) {
+                              console.error("Error saving department:", error);
+                              // Still add locally even if API fails
+                              setCustomDepartments(prev => [...prev, customDepartmentValue.trim()]);
+                              setFormData((prev) => ({ ...prev, department: customDepartmentValue.trim() }));
+                              setCustomDepartmentValue("");
+                              setShowCustomDepartmentInput(false);
+                            } finally {
+                              setDepartmentLoading(false);
+                            }
+                          }
+                        }}
+                        className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      >
+                        {departmentLoading ? "..." : "Add"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCustomDepartmentInput(false);
+                          setCustomDepartmentValue("");
+                        }}
+                        className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500">Enter a new department name to save it to the database</p>
+                  </div>
+                )}
                 {errors.department && (
                   <p className="mt-0.5 text-xs text-red-500">{errors.department}</p>
                 )}
